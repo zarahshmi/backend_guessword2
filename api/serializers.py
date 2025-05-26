@@ -11,16 +11,19 @@ class GameSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Game
-        fields = ['id', 'player1', 'player2', 'word', 'masked_word',
+        fields = ['id', 'player1', 'player2', 'masked_word',
                   'difficulty', 'status', 'created_at', 'started_at',
                   'current_turn', 'player1_score', 'player2_score']
         read_only_fields = ['player1_score', 'player2_score']
 
     def get_player1_score(self, obj):
-        return obj.player1.score
+        return obj.player1_score
 
     def get_player2_score(self, obj):
-        return obj.player2.score if obj.player2 else 0
+        return obj.player2_score if obj.player2 else 0
+
+
+
 
 
 
@@ -99,8 +102,6 @@ class ProfileSerializer(serializers.Serializer):
 
 
 
-
-
 class GameHistorySerializer(serializers.ModelSerializer):
     opponent = serializers.SerializerMethodField()
     result = serializers.SerializerMethodField()
@@ -126,24 +127,33 @@ class GameHistorySerializer(serializers.ModelSerializer):
             return None
 
         player1 = obj.player1
-        player2 = obj.player2 or user
+        player2 = obj.player2
 
-        if player1.score > player2.score:
+        # امتیازهای همان بازی
+        p1_score = obj.player1_score
+        p2_score = obj.player2_score
+
+        if p1_score > p2_score:
             return 'win' if user == player1 else 'lose'
-        elif player2.score > player1.score:
+        elif p2_score > p1_score:
             return 'win' if user == player2 else 'lose'
         return 'draw'
 
     def get_your_score(self, obj):
         user = self.context['request'].user
-        return user.score
+        if obj.player1 == user:
+            return obj.player1_score
+        elif obj.player2 == user:
+            return obj.player2_score
+        return 0
 
     def get_opponent_score(self, obj):
         user = self.context['request'].user
         if obj.player1 == user:
-            return obj.player2.score if obj.player2 else 0
-        return obj.player1.score
-
+            return obj.player2_score if obj.player2 else 0
+        elif obj.player2 == user:
+            return obj.player1_score
+        return 0
 
 
 
@@ -170,9 +180,9 @@ class LeaderboardSerializer(serializers.ModelSerializer):
             player1 = game.player1
             player2 = game.player2 if game.player2 else obj
 
-            if player1.score > player2.score and player1 == obj:
+            if game.player1_score > game.player2_score and player1 == obj:
                 wins += 1
-            elif player2.score > player1.score and player2 == obj:
+            elif game.player2_score > game.player1_score and player2 == obj:
                 wins += 1
 
 

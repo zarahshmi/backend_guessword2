@@ -140,6 +140,7 @@ class JoinGameAPIView(APIView):
 
 
 
+
 class GuessLetterAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -156,7 +157,7 @@ class GuessLetterAPIView(APIView):
         if game.turn != request.user:
             return Response({'error': 'It is not your turn'}, status=403)
 
-        if letter in game.masked_word or letter in [g.letter for g in game.guesses.all()]:
+        if game.guesses.filter(letter=letter).exists():
             return Response({'error': 'Letter already guessed'}, status=400)
 
         real_word = game.word
@@ -172,42 +173,69 @@ class GuessLetterAPIView(APIView):
 
         game.masked_word = ''.join(masked)
 
+        is_player1 = (game.player1 == request.user)
 
         if correct:
-            request.user.score += 20
+            if is_player1:
+                game.player1_score += 20
+            else:
+                game.player2_score += 20
         else:
-            request.user.score = max(0, request.user.score - 20)
-        request.user.save()
-
+            if is_player1:
+                game.player1_score = max(0, game.player1_score - 20)
+            else:
+                game.player2_score = max(0, game.player2_score - 20)
 
         if game.masked_word == game.word:
             game.status = 'finished'
 
+            if game.player1_score > game.player2_score:
+                game.turn = game.player1  # برنده بازی
+            elif game.player2_score > game.player1_score:
+                game.turn = game.player2
+            else:
+                game.turn = None  # مساوی
 
+            # بروزرسانی امتیاز و XP بازیکنان
             player1 = game.player1
             player2 = game.player2
 
-            if player1.score > player2.score:
-                game.turn = player1
-            elif player2.score > player1.score:
-                game.turn = player2
-            else:
-                game.turn = None
+            # افزودن امتیاز بازی به امتیاز کلی بازیکنان
+            player1.score += game.player1_score
+            player2_score = game.player2_score if player2 else 0
+            if player2:
+                player2.score += player2_score
+
+            # بروزرسانی XP و بررسی سطح
+            # مثلاً هر 100 XP سطح یک درجه افزایش می‌یابد
+            def update_player_level(player, gained_xp):
+                player.xp += gained_xp
+                while player.xp >= 100:
+                    player.xp -= 100
+                    player.level += 1
+
+            update_player_level(player1, game.player1_score)
+            if player2:
+                update_player_level(player2, player2_score)
+
+            player1.save()
+            if player2:
+                player2.save()
 
         else:
-
             game.turn = game.player2 if game.turn == game.player1 else game.player1
 
         game.save()
 
+        your_game_score = game.player1_score if is_player1 else game.player2_score
+
         return Response({
             'masked_word': game.masked_word,
             'correct': correct,
-            'next_turn': game.turn.username if game.status != 'finished' else None,
+            'next_turn': game.turn.username if game.status != 'finished' and game.turn else None,
             'game_status': game.status,
-            'your_score': request.user.score
+            'your_score': your_game_score
         })
-
 
 
 
@@ -265,22 +293,21 @@ class ProfileAPIView(APIView):
         losses = 0
 
         for game in finished_games:
-            player1 = game.player1
-            player2 = game.player2
-
-            if player1.score > player2.score:
-                if user == player1:
+            if game.player1_score > game.player2_score:
+                if user == game.player1:
                     wins += 1
                 else:
                     losses += 1
-            elif player2.score > player1.score:
-                if user == player2:
+            elif game.player2_score > game.player1_score:
+                if user == game.player2:
                     wins += 1
                 else:
                     losses += 1
+            else:
+                # مساوی حساب میشه، اگر خواستی اضافه کن
+                pass
 
         win_rate = round((wins / total_games) * 100, 2) if total_games > 0 else 0.0
-
 
         user.games_played = total_games
         user.wins = wins
@@ -327,3 +354,4 @@ class LeaderboardAPIView(APIView):
         top_players = Player.objects.order_by('-score', '-xp')[:10]
         serializer = LeaderboardSerializer(top_players, many=True)
         return Response(serializer.data)
+
